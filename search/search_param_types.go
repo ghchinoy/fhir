@@ -1,7 +1,6 @@
 package search
 
 import (
-	"fmt"
 	"math/big"
 	"net/url"
 	"regexp"
@@ -11,6 +10,24 @@ import (
 
 	//"github.com/davecgh/go-spew/spew"
 )
+
+/******************************************************************************
+ * SearchParamInfo contains information about a FHIR search parameter,
+ * including its name, type, and paths.  Paths are represented as a simple
+ * string map that maps a search path to a data type, for example:
+ * {
+ *   "valueDateTime" : "dateTime" ,
+ *   "valuePeriod"   : "Period"   ,
+ * }
+ *
+ * This map is used to allow the FHIR query parameter to be translated into a
+ * mongo query object.
+ ******************************************************************************/
+type SearchParamInfo struct {
+	Name  string
+	Type  string
+	Paths map[string]string
+}
 
 /******************************************************************************
  * COMPOSITE: a resource may also specify composite parameters that take
@@ -36,29 +53,96 @@ import (
  * http://hl7-fhir.github.io/search.html#date
  ******************************************************************************/
 
-type Date struct {
-	Prefix        Prefix
-	RangeLowIncl  time.Time
-	RangeHighExcl time.Time
-	Text          string
+type DateParam struct {
+	SearchParamInfo
+	Prefix Prefix
+	Date   *Date
+}
+
+func ParseDateParam(paramStr string, info SearchParamInfo) *DateParam {
+	date := &DateParam{SearchParamInfo: info}
+
+	var value string
+	date.Prefix, value = ExtractPrefixAndValue(paramStr)
+	date.Date = ParseDate(value)
+
+	return date
 }
 
 var DT_REGEX = regexp.MustCompile("([0-9]{4})(-(0[1-9]|1[0-2])(-(0[0-9]|[1-2][0-9]|3[0-1])(T([01][0-9]|2[0-3]):([0-5][0-9])(:([0-5][0-9])(\\.([0-9]+))?)?((Z)|(\\+|-)((0[0-9]|1[0-3]):([0-5][0-9])|(14):(00)))?)?)?)?")
 
-func NewDate(paramStr string) *Date {
-	date := &Date{}
-	var value string
-	date.Prefix, value = ExtractPrefixAndValue(paramStr)
-	if date.Prefix != EQ {
-		date.Text = date.Prefix.String()
-	}
+type Date struct {
+	Value     time.Time
+	Precision DatePrecision
+}
 
-	// TODO: What should we do if the time format is wrong?
-	if m := DT_REGEX.FindStringSubmatch(value); m != nil {
-		y, mo, d, h, mi, s, ms, tzStr, tzZu, tzOp, tzh, tzm := m[1], m[3], m[5], m[7], m[8], m[10], m[12], m[13], m[14], m[15], m[17], m[18]
+func (d *Date) String() string {
+	return d.Value.Format(d.Precision.Layout())
+}
+
+func (d *Date) RangeLowIncl() time.Time {
+	return d.Value
+}
+
+func (d *Date) RangeHighExcl() time.Time {
+	switch d.Precision {
+	case YEAR:
+		return d.Value.AddDate(1, 0, 0)
+	case MONTH:
+		return d.Value.AddDate(0, 1, 0)
+	case DAY:
+		return d.Value.AddDate(0, 0, 1)
+	case MINUTE:
+		return d.Value.Add(time.Minute)
+	case SECOND:
+		return d.Value.Add(time.Second)
+	case MILLISECOND:
+		return d.Value.Add(time.Millisecond)
+	default:
+		return d.Value.Add(time.Millisecond)
+	}
+}
+
+func ParseDate(dateStr string) *Date {
+	dt := &Date{}
+
+	dateStr = strings.TrimSpace(dateStr)
+	if m := DT_REGEX.FindStringSubmatch(dateStr); m != nil {
+		y, mo, d, h, mi, s, ms, tzZu, tzOp, tzh, tzm := m[1], m[3], m[5], m[7], m[8], m[10], m[12], m[14], m[15], m[17], m[18]
+
+		switch {
+		case ms != "":
+			dt.Precision = MILLISECOND
+
+			// Fix milliseconds (.9 -> .900, .99 -> .990, .999999 -> .999 )
+			switch len(ms) {
+			case 1:
+				ms += "00"
+			case 2:
+				ms += "0"
+			case 3:
+				// do nothing
+			default:
+				ms = ms[:3]
+			}
+		case s != "":
+			dt.Precision = SECOND
+		case mi != "":
+			dt.Precision = MINUTE
+		// NOTE: Skip hour precision since FHIR specification disallows it
+		case d != "":
+			dt.Precision = DAY
+		case mo != "":
+			dt.Precision = MONTH
+		case y != "":
+			dt.Precision = YEAR
+		default:
+			dt.Precision = MILLISECOND
+		}
+
+		// Get the location (if no time components or no location, use local)
 		loc := time.Local
 		if h != "" {
-			// Fix the timezone
 			if tzZu == "Z" {
 				loc, _ = time.LoadLocation("UTC")
 			} else if tzOp != "" && tzh != "" && tzm != "" {
@@ -72,52 +156,59 @@ func NewDate(paramStr string) *Date {
 			}
 		}
 
-		layout := "2006-01-02T15:04:05.000"
-		if ms != "" {
-			// Fix milliseconds (.9 -> .900, .99 -> .990, .999999 -> .999 )
-			if ms != "" {
-				switch len(ms) {
-				case 1:
-					ms += "00"
-				case 2:
-					ms += "0"
-				case 3:
-					// do nothing
-				default:
-					ms = ms[:3]
-				}
-			}
-
-			date.RangeLowIncl, _ = time.ParseInLocation(layout, fmt.Sprintf("%s-%s-%sT%s:%s:%s.%s", y, mo, d, h, mi, s, ms), loc)
-			date.RangeHighExcl = date.RangeLowIncl.Add(time.Millisecond)
-			date.Text += fmt.Sprintf("%s-%s-%sT%s:%s:%s.%s%s", y, mo, d, h, mi, s, ms, tzStr)
-		} else if s != "" {
-			date.RangeLowIncl, _ = time.ParseInLocation(layout, fmt.Sprintf("%s-%s-%sT%s:%s:%s.000", y, mo, d, h, mi, s), loc)
-			date.RangeHighExcl = date.RangeLowIncl.Add(time.Second)
-			date.Text += fmt.Sprintf("%s-%s-%sT%s:%s:%s%s", y, mo, d, h, mi, s, tzStr)
-		} else if mi != "" {
-			date.RangeLowIncl, _ = time.ParseInLocation(layout, fmt.Sprintf("%s-%s-%sT%s:%s:00.000", y, mo, d, h, mi), loc)
-			date.RangeHighExcl = date.RangeLowIncl.Add(time.Minute)
-			date.Text += fmt.Sprintf("%s-%s-%sT%s:%s%s", y, mo, d, h, mi, tzStr)
-		} else if d != "" {
-			// NOTE: FHIR spec says that if hours are specified, minutes MUST be specified, so hours-only defaults to days
-			date.RangeLowIncl, _ = time.ParseInLocation(layout, fmt.Sprintf("%s-%s-%sT00:00:00.000", y, mo, d), loc)
-			date.RangeHighExcl = date.RangeLowIncl.AddDate(0, 0, 1)
-			date.Text += fmt.Sprintf("%s-%s-%s", y, mo, d)
-		} else if mo != "" {
-			date.RangeLowIncl, _ = time.ParseInLocation(layout, fmt.Sprintf("%s-%s-01T00:00:00.000", y, mo), loc)
-			date.RangeHighExcl = date.RangeLowIncl.AddDate(0, 1, 0)
-			date.Text += fmt.Sprintf("%s-%s", y, mo)
-		} else if y != "" {
-			date.RangeLowIncl, _ = time.ParseInLocation(layout, fmt.Sprintf("%s-01-01T00:00:00.000", y), loc)
-			date.RangeHighExcl = date.RangeLowIncl.AddDate(1, 0, 0)
-			date.Text += fmt.Sprintf("%s", y)
-		} else {
-			// What to do?
+		// Convert to a time.Time
+		yInt, _ := strconv.Atoi(y)
+		moInt, err := strconv.Atoi(mo)
+		if err != nil {
+			moInt = 1
 		}
+		dInt, err := strconv.Atoi(d)
+		if err != nil {
+			dInt = 1
+		}
+		hInt, _ := strconv.Atoi(h)
+		miInt, _ := strconv.Atoi(mi)
+		sInt, _ := strconv.Atoi(s)
+		msInt, _ := strconv.Atoi(ms)
+
+		dt.Value = time.Date(yInt, time.Month(moInt), dInt, hInt, miInt, sInt, msInt*1000*1000, loc)
+	} else {
+		// TODO: What should we do if the time format is wrong?  Right now, we default to NOW
+		dt.Precision = MILLISECOND
+		dt.Value = time.Now()
 	}
 
-	return date
+	return dt
+}
+
+type DatePrecision int
+
+const (
+	YEAR DatePrecision = iota
+	MONTH
+	DAY
+	MINUTE
+	SECOND
+	MILLISECOND
+)
+
+func (p DatePrecision) Layout() string {
+	switch p {
+	case YEAR:
+		return "2006"
+	case MONTH:
+		return "2006-01"
+	case DAY:
+		return "2006-01-02"
+	case MINUTE:
+		return "2006-01-02T15:04-07:00"
+	case SECOND:
+		return "2006-01-02T15:04:05-07:00"
+	case MILLISECOND:
+		return "2006-01-02T15:04:05.000-07:00"
+	default:
+		return "2006-01-02T15:04:05.000-07:00"
+	}
 }
 
 /******************************************************************************
@@ -126,41 +217,65 @@ func NewDate(paramStr string) *Date {
  * http://hl7-fhir.github.io/search.html#number
  ******************************************************************************/
 
-type Number struct {
-	Prefix        Prefix
-	Number        *big.Rat
-	RangeLowIncl  *big.Rat
-	RangeHighExcl *big.Rat
-	Text          string
+type NumberParam struct {
+	SearchParamInfo
+	Prefix Prefix
+	Number *Number
 }
 
-func NewNumber(paramStr string) *Number {
-	n := &Number{Number: new(big.Rat), RangeLowIncl: new(big.Rat), RangeHighExcl: new(big.Rat)}
+func ParseNumberParam(paramStr string, info SearchParamInfo) *NumberParam {
+	n := &NumberParam{SearchParamInfo: info}
+
 	var value string
 	n.Prefix, value = ExtractPrefixAndValue(paramStr)
-	if n.Prefix != EQ {
-		n.Text = n.Prefix.String()
-	}
-	n.Text += value
-	n.Number.SetString(value)
+	n.Number = ParseNumber(value)
 
-	/* FHIR spec defines equality for 100 to be the range [99.5, 100.5) so we must support min/max using rounding semantics.
-	 * The basic algorithm for determining low/high is:
-	 *   low  (inclusive) = n - 5 / 10^p
-	 *   high (exclusive) = n + 5 / 10^p
-	 * where n is the number and p is the count of the number's decimal places + 1.
-	 */
+	return n
+}
 
-	p := 1
-	i := strings.Index(value, ".")
-	if i != -1 {
-		p = len(value) - i
-	}
+type Number struct {
+	Value     *big.Rat
+	Precision int
+}
+
+func (n *Number) String() string {
+	return n.Value.FloatString(n.Precision)
+}
+
+func (n *Number) RangeLowIncl() *big.Rat {
+	return new(big.Rat).Sub(n.Value, n.rangeDelta())
+}
+
+func (n *Number) RangeHighExcl() *big.Rat {
+	return new(big.Rat).Add(n.Value, n.rangeDelta())
+}
+
+/* FHIR spec defines equality for 100 to be the range [99.5, 100.5) so we must support min/max
+ * using rounding semantics. The basic algorithm for determining low/high is:
+ *   low  (inclusive) = n - 5 / 10^p
+ *   high (exclusive) = n + 5 / 10^p
+ * where n is the number and p is the count of the number's decimal places + 1.
+ *
+ * This function returns the delta ( 5 / 10^p )
+ */
+func (n *Number) rangeDelta() *big.Rat {
+	p := n.Precision + 1
 	denomInt := new(big.Int).Exp(big.NewInt(int64(10)), big.NewInt(int64(p)), nil)
 	denomRat, _ := new(big.Rat).SetString(denomInt.String())
-	delta := new(big.Rat).Quo(new(big.Rat).SetInt64(5), denomRat)
-	n.RangeLowIncl.Sub(n.Number, delta)
-	n.RangeHighExcl.Add(n.Number, delta)
+	return new(big.Rat).Quo(new(big.Rat).SetInt64(5), denomRat)
+}
+
+func ParseNumber(numStr string) *Number {
+	n := &Number{}
+
+	numStr = strings.TrimSpace(numStr)
+	n.Value, _ = new(big.Rat).SetString(numStr)
+	i := strings.Index(numStr, ".")
+	if i != -1 {
+		n.Precision = len(numStr) - i - 1
+	} else {
+		n.Precision = 0
+	}
 
 	return n
 }
@@ -171,29 +286,26 @@ func NewNumber(paramStr string) *Number {
  * http://hl7-fhir.github.io/search.html#quantity
  ******************************************************************************/
 
-type Quantity struct {
+type QuantityParam struct {
+	SearchParamInfo
 	Prefix Prefix
 	Number *Number
 	System string
 	Code   string
-	Text   string
 }
 
-func NewQuantity(paramStr string) *Quantity {
-	q := &Quantity{}
+func ParseQuantityParam(paramStr string, info SearchParamInfo) *QuantityParam {
+	q := &QuantityParam{SearchParamInfo: info}
+
 	var value string
 	q.Prefix, value = ExtractPrefixAndValue(paramStr)
-	if q.Prefix != EQ {
-		q.Text = q.Prefix.String()
-	}
 
 	split := escapeFriendlySplit(value, '|')
-	q.Number = NewNumber(split[0])
+	q.Number = ParseNumber(split[0])
 	if len(split) == 3 {
 		q.System = unescape(split[1])
 		q.Code = unescape(split[2])
 	}
-	q.Text += fmt.Sprintf("%s|%s|%s", q.Number.Text, escape(q.System), escape(q.Code))
 
 	return q
 }
@@ -206,15 +318,16 @@ func NewQuantity(paramStr string) *Quantity {
  * http://hl7-fhir.github.io/search.html#reference
  ******************************************************************************/
 
-type Reference struct {
+type ReferenceParam struct {
+	SearchParamInfo
 	Reference string
 }
 
-func (r *Reference) IsId() bool {
+func (r *ReferenceParam) IsId() bool {
 	return !r.IsUrl()
 }
 
-func (r *Reference) IsUrl() bool {
+func (r *ReferenceParam) IsUrl() bool {
 	u, e := url.Parse(r.Reference)
 	if e == nil {
 		return u.IsAbs()
@@ -222,8 +335,8 @@ func (r *Reference) IsUrl() bool {
 	return false
 }
 
-func NewReference(paramStr string) *Reference {
-	return &Reference{paramStr}
+func ParseReferenceParam(paramStr string, info SearchParamInfo) *ReferenceParam {
+	return &ReferenceParam{info, unescape(paramStr)}
 }
 
 /******************************************************************************
@@ -236,12 +349,13 @@ func NewReference(paramStr string) *Reference {
  * http://hl7-fhir.github.io/search.html#string
  ******************************************************************************/
 
-type String struct {
+type StringParam struct {
+	SearchParamInfo
 	String string
 }
 
-func NewString(paramStr string) *String {
-	return &String{paramStr}
+func ParseStringParam(paramString string, info SearchParamInfo) *StringParam {
+	return &StringParam{info, unescape(paramString)}
 }
 
 /******************************************************************************
@@ -253,16 +367,16 @@ func NewString(paramStr string) *String {
  * http://hl7-fhir.github.io/search.html#token
  ******************************************************************************/
 
-type Token struct {
-	AnySystem bool
+type TokenParam struct {
+	SearchParamInfo
 	System    string
 	Code      string
-	Text      string
+	AnySystem bool
 }
 
-func NewToken(paramStr string) *Token {
-	t := &Token{Text: paramStr}
-	splitCode := escapeFriendlySplit(paramStr, '|')
+func ParseTokenParam(paramString string, info SearchParamInfo) *TokenParam {
+	t := &TokenParam{SearchParamInfo: info}
+	splitCode := escapeFriendlySplit(paramString, '|')
 	if len(splitCode) > 1 {
 		t.System = unescape(splitCode[0])
 		t.Code = unescape(splitCode[1])
@@ -281,12 +395,13 @@ func NewToken(paramStr string) *Token {
  * http://hl7-fhir.github.io/search.html#uri
  ******************************************************************************/
 
-type URI struct {
+type URIParam struct {
+	SearchParamInfo
 	URI string
 }
 
-func NewURI(paramStr string) *URI {
-	return &URI{paramStr}
+func ParseURIParam(paramStr string, info SearchParamInfo) *URIParam {
+	return &URIParam{info, unescape(paramStr)}
 }
 
 /******************************************************************************
