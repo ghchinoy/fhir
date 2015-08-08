@@ -11,6 +11,29 @@ import (
 	//"github.com/davecgh/go-spew/spew"
 )
 
+type Query struct {
+	Resource string
+	Query    string
+}
+
+func (q *Query) Params() []SearchParam {
+	var results []SearchParam
+	queryMap, _ := url.ParseQuery(q.Query)
+	for param, values := range queryMap {
+		info, ok := SearchParameterDictionary[q.Resource][param]
+		if ok {
+			for _, value := range values {
+				results = append(results, info.CreateSearchParam(value))
+			}
+		}
+	}
+	return results
+}
+
+type SearchParam interface {
+	getInfo() SearchParamInfo
+}
+
 /******************************************************************************
  * SearchParamInfo contains information about a FHIR search parameter,
  * including its name, type, and paths.  Paths are represented as a simple
@@ -27,6 +50,28 @@ type SearchParamInfo struct {
 	Name  string
 	Type  string
 	Paths map[string]string
+}
+
+func (s SearchParamInfo) CreateSearchParam(paramStr string) SearchParam {
+	switch s.Type {
+	case "composite":
+		return nil
+	case "date":
+		return ParseDateParam(paramStr, s)
+	case "number":
+		return ParseNumberParam(paramStr, s)
+	case "quantity":
+		return ParseQuantityParam(paramStr, s)
+	case "reference":
+		return ParseReferenceParam(paramStr, s)
+	case "string":
+		return ParseStringParam(paramStr, s)
+	case "token":
+		return ParseTokenParam(paramStr, s)
+	case "uri":
+		return ParseURIParam(paramStr, s)
+	}
+	return nil
 }
 
 /******************************************************************************
@@ -57,6 +102,10 @@ type DateParam struct {
 	SearchParamInfo
 	Prefix Prefix
 	Date   *Date
+}
+
+func (d *DateParam) getInfo() SearchParamInfo {
+	return d.SearchParamInfo
 }
 
 func ParseDateParam(paramStr string, info SearchParamInfo) *DateParam {
@@ -223,6 +272,10 @@ type NumberParam struct {
 	Number *Number
 }
 
+func (n *NumberParam) getInfo() SearchParamInfo {
+	return n.SearchParamInfo
+}
+
 func ParseNumberParam(paramStr string, info SearchParamInfo) *NumberParam {
 	n := &NumberParam{SearchParamInfo: info}
 
@@ -294,6 +347,10 @@ type QuantityParam struct {
 	Code   string
 }
 
+func (q *QuantityParam) getInfo() SearchParamInfo {
+	return q.SearchParamInfo
+}
+
 func ParseQuantityParam(paramStr string, info SearchParamInfo) *QuantityParam {
 	q := &QuantityParam{SearchParamInfo: info}
 
@@ -323,11 +380,49 @@ type ReferenceParam struct {
 	Reference string
 }
 
-func (r *ReferenceParam) IsId() bool {
-	return !r.IsUrl()
+func (r *ReferenceParam) getInfo() SearchParamInfo {
+	return r.SearchParamInfo
 }
 
-func (r *ReferenceParam) IsUrl() bool {
+func (r *ReferenceParam) GetId() (id string, ok bool) {
+	if r.Reference == "" {
+		ok = false
+	} else if !r.isUrl() {
+		i := strings.LastIndex(r.Reference, "/")
+		id = r.Reference[i+1:]
+		ok = true
+	} else {
+		ok = false
+	}
+	return
+}
+
+func (r *ReferenceParam) GetType() (typ string, ok bool) {
+	if !r.isUrl() {
+		i := strings.LastIndex(r.Reference, "/")
+		if i == -1 {
+			ok = false
+		} else {
+			typ = r.Reference[:i]
+			ok = true
+		}
+	} else {
+		ok = false
+	}
+	return
+}
+
+func (r *ReferenceParam) GetUrl() (url string, ok bool) {
+	if r.isUrl() {
+		url = r.Reference
+		ok = true
+	} else {
+		ok = false
+	}
+	return
+}
+
+func (r *ReferenceParam) isUrl() bool {
 	u, e := url.Parse(r.Reference)
 	if e == nil {
 		return u.IsAbs()
@@ -335,7 +430,16 @@ func (r *ReferenceParam) IsUrl() bool {
 	return false
 }
 
+func (r *ReferenceParam) IsId() bool {
+	return !r.isUrl()
+}
+
+func (r *ReferenceParam) IsUrl() bool {
+	return r.isUrl()
+}
+
 func ParseReferenceParam(paramStr string, info SearchParamInfo) *ReferenceParam {
+	//r := unescape(paramStr)
 	return &ReferenceParam{info, unescape(paramStr)}
 }
 
@@ -352,6 +456,10 @@ func ParseReferenceParam(paramStr string, info SearchParamInfo) *ReferenceParam 
 type StringParam struct {
 	SearchParamInfo
 	String string
+}
+
+func (s *StringParam) getInfo() SearchParamInfo {
+	return s.SearchParamInfo
 }
 
 func ParseStringParam(paramString string, info SearchParamInfo) *StringParam {
@@ -372,6 +480,10 @@ type TokenParam struct {
 	System    string
 	Code      string
 	AnySystem bool
+}
+
+func (t *TokenParam) getInfo() SearchParamInfo {
+	return t.SearchParamInfo
 }
 
 func ParseTokenParam(paramString string, info SearchParamInfo) *TokenParam {
@@ -398,6 +510,10 @@ func ParseTokenParam(paramString string, info SearchParamInfo) *TokenParam {
 type URIParam struct {
 	SearchParamInfo
 	URI string
+}
+
+func (u *URIParam) getInfo() SearchParamInfo {
+	return u.SearchParamInfo
 }
 
 func ParseURIParam(paramStr string, info SearchParamInfo) *URIParam {

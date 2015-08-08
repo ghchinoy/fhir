@@ -730,8 +730,35 @@ func (s *SearchPTSuite) TestReferenceID(c *C) {
 	c.Assert(r.Paths, HasLen, 1)
 	c.Assert(r.Paths["bar"], Equals, "reference")
 	c.Assert(r.Reference, Equals, "23")
-	c.Assert(r.IsId(), Equals, true)
-	c.Assert(r.IsUrl(), Equals, false)
+
+	id, ok := r.GetId()
+	c.Assert(id, Equals, "23")
+	c.Assert(ok, Equals, true)
+	typ, ok := r.GetType()
+	c.Assert(typ, Equals, "")
+	c.Assert(ok, Equals, false)
+	url, ok := r.GetUrl()
+	c.Assert(url, Equals, "")
+	c.Assert(ok, Equals, false)
+}
+
+func (s *SearchPTSuite) TestReferenceTypeAndId(c *C) {
+	r := ParseReferenceParam("Patient/23", referenceParamInfo)
+
+	c.Assert(r.Name, Equals, "foo")
+	c.Assert(r.Type, Equals, "reference")
+	c.Assert(r.Paths, HasLen, 1)
+	c.Assert(r.Paths["bar"], Equals, "reference")
+
+	id, ok := r.GetId()
+	c.Assert(id, Equals, "23")
+	c.Assert(ok, Equals, true)
+	typ, ok := r.GetType()
+	c.Assert(typ, Equals, "Patient")
+	c.Assert(ok, Equals, true)
+	url, ok := r.GetUrl()
+	c.Assert(url, Equals, "")
+	c.Assert(ok, Equals, false)
 }
 
 func (s *SearchPTSuite) TestReferenceAbsoluteURL(c *C) {
@@ -742,21 +769,16 @@ func (s *SearchPTSuite) TestReferenceAbsoluteURL(c *C) {
 	c.Assert(r.Paths, HasLen, 1)
 	c.Assert(r.Paths["bar"], Equals, "reference")
 	c.Assert(r.Reference, Equals, "http://acme.org/fhir/Patient/23")
-	c.Assert(r.IsId(), Equals, false)
-	c.Assert(r.IsUrl(), Equals, true)
-}
 
-func (s *SearchPTSuite) TestReferenceRelativeURL(c *C) {
-	r := ParseReferenceParam("Patient/23", referenceParamInfo)
-
-	c.Assert(r.Name, Equals, "foo")
-	c.Assert(r.Type, Equals, "reference")
-	c.Assert(r.Paths, HasLen, 1)
-	c.Assert(r.Paths["bar"], Equals, "reference")
-	// According to FHIR spec, URLs must be absolute, so this is interpreted as ID
-	c.Assert(r.Reference, Equals, "Patient/23")
-	c.Assert(r.IsId(), Equals, true)
-	c.Assert(r.IsUrl(), Equals, false)
+	id, ok := r.GetId()
+	c.Assert(id, Equals, "")
+	c.Assert(ok, Equals, false)
+	typ, ok := r.GetType()
+	c.Assert(typ, Equals, "")
+	c.Assert(ok, Equals, false)
+	url, ok := r.GetUrl()
+	c.Assert(url, Equals, "http://acme.org/fhir/Patient/23")
+	c.Assert(ok, Equals, true)
 }
 
 /******************************************************************************
