@@ -13,7 +13,7 @@ import (
 // Constant values for search paramaters and search result parameters
 const (
 	IDParam            = "_id"
-	LastUpdatedParam   = "_lastUpdate"
+	LastUpdatedParam   = "_lastUpdated"
 	TagParam           = "_tag"
 	ProfileParam       = "_profile"
 	SecurityParam      = "_security"
@@ -30,6 +30,7 @@ const (
 	ContainedParam     = "_contained"
 	ContainedTypeParam = "_containedType"
 	OffsetParam        = "_offset" // Custom param, not in FHIR spec
+	FormatParam        = "_format"
 )
 
 var globalSearchParams = map[string]bool{IDParam: true, LastUpdatedParam: true, TagParam: true,
@@ -43,7 +44,7 @@ func isGlobalSearchParam(param string) bool {
 
 var searchResultParams = map[string]bool{SortParam: true, CountParam: true, IncludeParam: true,
 	RevIncludeParam: true, SummaryParam: true, ElementsParam: true, ContainedParam: true,
-	ContainedTypeParam: true, OffsetParam: true}
+	ContainedTypeParam: true, OffsetParam: true, FormatParam: true}
 
 func isSearchResultParam(param string) bool {
 	_, found := searchResultParams[param]
@@ -65,9 +66,9 @@ type Query struct {
 // slice containing a ReferenceParam (for patient) and a DateParam (for onset).
 func (q *Query) Params() []SearchParam {
 	var results []SearchParam
-	queryMap, _ := url.ParseQuery(q.Query)
-	for param, values := range queryMap {
-		param, modifier, postfix := ParseParamNameModifierAndPostFix(param)
+	queryParams, _ := ParseQuery(q.Query)
+	for _, queryParam := range queryParams.All() {
+		param, modifier, postfix := ParseParamNameModifierAndPostFix(queryParam.Key)
 		if isSearchResultParam(param) {
 			continue
 		}
@@ -76,11 +77,9 @@ func (q *Query) Params() []SearchParam {
 		if ok {
 			info.Postfix = postfix
 			info.Modifier = modifier
-			for _, value := range values {
-				results = append(results, info.CreateSearchParam(value))
-			}
+			results = append(results, info.CreateSearchParam(queryParam.Value))
 		} else {
-			// Check if it's a global search parameter. If so, we must not support it yet.
+
 			if isGlobalSearchParam(param) {
 				panic(createUnsupportedSearchError("MSG_PARAM_UNKNOWN", fmt.Sprintf("Parameter \"%s\" not understood", param)))
 			} else {
@@ -94,35 +93,105 @@ func (q *Query) Params() []SearchParam {
 // Options parses the query string and returns the QueryOptions.
 func (q *Query) Options() *QueryOptions {
 	options := NewQueryOptions()
-	queryMap, _ := url.ParseQuery(q.Query)
-	for param, values := range queryMap {
-		param, _, _ := ParseParamNameModifierAndPostFix(param)
+	queryParams, _ := ParseQuery(q.Query)
+	for _, queryParam := range queryParams.All() {
+		param, modifier, _ := ParseParamNameModifierAndPostFix(queryParam.Key)
 		if !strings.HasPrefix(param, "_") || isGlobalSearchParam(param) {
 			continue
 		}
 
-		if len(values) != 1 {
-			panic(createInvalidSearchError("MSG_PARAM_NO_REPEAT", fmt.Sprintf("Parameter \"%s\" is not allowed to repeat", param)))
-		}
-		value := values[0]
-
 		switch param {
+
 		case CountParam:
-			count, err := strconv.Atoi(value)
+			count, err := strconv.Atoi(queryParam.Value)
 			if err != nil {
 				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_count\" content is invalid"))
 			}
 			if count >= 0 {
 				options.Count = count
 			}
+
 		case OffsetParam:
-			offset, err := strconv.Atoi(value)
+			offset, err := strconv.Atoi(queryParam.Value)
 			if err != nil {
 				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_offset\" content is invalid"))
 			}
 			if offset >= 0 {
 				options.Offset = offset
 			}
+
+		case SortParam:
+			// The following supports both DSTU2-style sorts and STU3-style sorts
+			keys := strings.Split(queryParam.Value, ",")
+			for _, key := range keys {
+				desc := strings.HasPrefix(key, "-") || modifier == "desc"
+				sortParam, ok := SearchParameterDictionary[q.Resource][strings.TrimPrefix(key, "-")]
+				if !ok {
+					panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_sort\" content is invalid"))
+				}
+				options.Sort = append(options.Sort, SortOption{Descending: desc, Parameter: sortParam})
+			}
+			// If this was an STU3-style sort, remember that so we reconstruct the query URL correctly
+			if len(keys) > 1 || strings.HasPrefix(queryParam.Value, "-") {
+				options.IsSTU3Sort = true
+			}
+
+		case IncludeParam:
+			incls := strings.Split(queryParam.Value, ":")
+			if len(incls) < 2 || len(incls) > 3 {
+				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+			}
+			inclParam, ok := SearchParameterDictionary[incls[0]][incls[1]]
+			if !ok {
+				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+			}
+			// Only reference paramaters count, so verify it is a reference parameter
+			if inclParam.Type != "reference" {
+				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+			}
+			if len(incls) == 3 {
+				if isValidTarget(incls[2], inclParam) {
+					// Modify the targets to include only the one noted
+					inclParam.Targets = []string{incls[2]}
+				} else {
+					panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+				}
+			}
+			options.Include = append(options.Include, IncludeOption{Resource: incls[0], Parameter: inclParam})
+
+		case RevIncludeParam:
+			incls := strings.Split(queryParam.Value, ":")
+			if len(incls) < 2 || len(incls) > 3 {
+				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+			}
+			revInclParam, ok := SearchParameterDictionary[incls[0]][incls[1]]
+			if !ok {
+				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+			}
+			// Only reference paramaters count, so verify it is a reference parameter
+			if revInclParam.Type != "reference" {
+				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+			}
+			// Only the currently searched on resource is a valid target (or "Any")
+			target := q.Resource
+			if len(incls) == 3 && incls[2] != target && incls[2] != "Any" {
+				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+			}
+			// Make sure the selected param actually supports the intended target
+			if isValidTarget(target, revInclParam) {
+				// Modify the targets to include only the resource we're searching on
+				revInclParam.Targets = []string{target}
+			} else {
+				panic(createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+			}
+			options.RevInclude = append(options.RevInclude, RevIncludeOption{Resource: incls[0], Parameter: revInclParam})
+
+		case FormatParam:
+			if queryParam.Value != "json" && queryParam.Value != "application/json" && queryParam.Value != "application/json+fhir" {
+				// Currently we only support JSON
+				panic(createUnsupportedSearchError("MSG_PARAM_INVALID", "Parameter \"_format\" content is invalid"))
+			}
+
 		default:
 			panic(createUnsupportedSearchError("MSG_PARAM_UNKNOWN", fmt.Sprintf("Parameter \"%s\" not understood", param)))
 		}
@@ -130,45 +199,108 @@ func (q *Query) Options() *QueryOptions {
 	return options
 }
 
-// NormalizedQueryValues reconstructs the URL-encoded query based on parsed
+func getSingletonParamValue(param string, values []string) string {
+	if len(values) != 1 {
+		panic(createInvalidSearchError("MSG_PARAM_NO_REPEAT", fmt.Sprintf("Parameter \"%s\" is not allowed to repeat", param)))
+	}
+	return values[0]
+}
+
+func isValidTarget(target string, param SearchParamInfo) bool {
+	for _, pTarget := range param.Targets {
+		if pTarget == target || pTarget == "Any" {
+			return true
+		}
+	}
+	return false
+}
+
+// URLQueryParameters reconstructs the URL-encoded query based on parsed
 // parameters.  This ensures better uniformity/consistency and also removes any
 // garbage parameters or bad formatting in the passed in parameters.  If
 // withOptions is specified, the query options will also be included in the
-// values.
-func (q *Query) NormalizedQueryValues(withOptions bool) url.Values {
-	values := url.Values{}
+// URLQueryParameters.
+func (q *Query) URLQueryParameters(withOptions bool) URLQueryParameters {
+	var queryParams URLQueryParameters
 	for _, param := range q.Params() {
 		k, v := param.getQueryParamAndValue()
-		values.Add(k, v)
+		queryParams.Add(k, v)
 	}
 
 	if withOptions {
-		oValues := q.Options().QueryValues()
-		for k, v := range oValues {
-			values.Set(k, v[0])
+		oQueryParams := q.Options().URLQueryParameters()
+		for _, oQueryParam := range oQueryParams.All() {
+			queryParams.Add(oQueryParam.Key, oQueryParam.Value)
 		}
 	}
 
-	return values
+	return queryParams
 }
 
 // QueryOptions contains option values such as count and offset.
 type QueryOptions struct {
-	Count  int
-	Offset int
+	Count      int
+	Offset     int
+	Sort       []SortOption
+	Include    []IncludeOption
+	RevInclude []RevIncludeOption
+	IsSTU3Sort bool
 }
 
+// NewQueryOptions constructs a new QueryOptions with default values (offset = 0, Count = 100)
 func NewQueryOptions() *QueryOptions {
 	return &QueryOptions{Offset: 0, Count: 100}
 }
 
-// QueryValues returns values representing the query options.
-func (o *QueryOptions) QueryValues() url.Values {
-	values := url.Values{}
-	values.Set(CountParam, strconv.Itoa(o.Count))
-	values.Set(OffsetParam, strconv.Itoa(o.Offset))
+// URLQueryParameters returns URLQueryParameters representing the query options.
+func (o *QueryOptions) URLQueryParameters() URLQueryParameters {
+	var queryParams URLQueryParameters
+	if o.IsSTU3Sort {
+		keys := make([]string, len(o.Sort))
+		for i := range o.Sort {
+			if o.Sort[i].Descending {
+				keys[i] = fmt.Sprintf("-%s", o.Sort[i].Parameter.Name)
+			} else {
+				keys[i] = o.Sort[i].Parameter.Name
+			}
+		}
+		queryParams.Add(SortParam, strings.Join(keys, ","))
+	} else {
+		for _, sort := range o.Sort {
+			sortParamKey := SortParam
+			if sort.Descending {
+				sortParamKey += ":desc"
+			}
+			queryParams.Add(sortParamKey, sort.Parameter.Name)
+		}
+	}
+	queryParams.Set(OffsetParam, strconv.Itoa(o.Offset))
+	queryParams.Set(CountParam, strconv.Itoa(o.Count))
+	for _, incl := range o.Include {
+		queryParams.Add(IncludeParam, fmt.Sprintf("%s:%s", incl.Resource, incl.Parameter.Name))
+	}
+	for _, incl := range o.RevInclude {
+		queryParams.Add(RevIncludeParam, fmt.Sprintf("%s:%s", incl.Resource, incl.Parameter.Name))
+	}
+	return queryParams
+}
 
-	return values
+// IncludeOption describes the data that should be included in query results
+type IncludeOption struct {
+	Resource  string
+	Parameter SearchParamInfo
+}
+
+// RevIncludeOption describes the data that should be included in query results
+type RevIncludeOption struct {
+	Resource  string
+	Parameter SearchParamInfo
+}
+
+// SortOption indicates what parameter to sort on and the sort order
+type SortOption struct {
+	Descending bool
+	Parameter  SearchParamInfo
 }
 
 // SearchParam is an interface for all search parameter classes that exposes
@@ -178,9 +310,18 @@ type SearchParam interface {
 	getQueryParamAndValue() (string, string)
 }
 
+// SearchParamData represents the data associated to an instance of a search param
+type SearchParamData struct {
+	Modifier string
+	Chain    string
+	Prefix   Prefix
+	Value    string
+}
+
 // SearchParamInfo contains information about a FHIR search parameter,
 // including its name, type, and paths or composites.
 type SearchParamInfo struct {
+	Resource   string
 	Name       string
 	Type       string
 	Paths      []SearchParamPath
@@ -215,6 +356,21 @@ func (s SearchParamInfo) CreateSearchParam(paramStr string) SearchParam {
 		return ParseTokenParam(paramStr, s)
 	case "uri":
 		return ParseURIParam(paramStr, s)
+	default:
+		// Check for a custom search parameter
+		if parser, err := GlobalRegistry().LookupParameterParser(s.Type); err == nil {
+			data := SearchParamData{
+				Modifier: s.Modifier,
+				Chain:    s.Postfix,
+				Prefix:   s.Prefix,
+				Value:    paramStr,
+			}
+			param, err := parser(s, data)
+			if err != nil {
+				panic(createInternalServerError("MSG_PARAM_INVALID", fmt.Sprintf("Parameter \"%s\" content is invalid", s.Name)))
+			}
+			return param
+		}
 	}
 	return nil
 }
@@ -222,7 +378,8 @@ func (s SearchParamInfo) CreateSearchParam(paramStr string) SearchParam {
 // SearchParamPath indicates a dot-separated path to the property that should
 // be searched, as well as the FHIR type of that property (e.g., "dateTime").
 // The path indicates elements that are arrays by prefixing the element name
-// with "[]" (e.g., "order.[]item.name").
+// with "[]" (e.g., "order.[]item.name").  In the rare case that the search
+// path has an indexer, it will be in the brackets (e.g.,"[0]item.entry")
 type SearchParamPath struct {
 	Path string
 	Type string
@@ -620,17 +777,20 @@ func (r *ReferenceParam) getQueryParamAndValue() (string, string) {
 // ParseReferenceParam parses a reference-based query string and returns a
 // pointer to a ReferenceParam based on the query and the parameter definition.
 func ParseReferenceParam(paramStr string, info SearchParamInfo) *ReferenceParam {
-	ref := unescape(paramStr)
-	re := regexp.MustCompile("\\/?(([^\\/]+)\\/)?([^\\/]+)$")
-	if m := re.FindStringSubmatch(ref); m != nil {
-		typ := findReferencedType(m[2], info)
-		if info.Postfix != "" {
-			q := Query{Resource: typ, Query: info.Postfix + "=" + paramStr}
-			return &ReferenceParam{info, ChainedQueryReference{Type: typ, ChainedQuery: q}}
-		} else if u, e := url.Parse(ref); e == nil && u.IsAbs() {
-			return &ReferenceParam{info, ExternalReference{Type: typ, URL: ref}}
-		} else {
-			return &ReferenceParam{info, LocalReference{Type: typ, ID: m[3]}}
+	if info.Postfix != "" {
+		typ := findReferencedType("", info)
+		q := Query{Resource: typ, Query: info.Postfix + "=" + paramStr}
+		return &ReferenceParam{info, ChainedQueryReference{Type: typ, ChainedQuery: q}}
+	} else {
+		ref := unescape(paramStr)
+		re := regexp.MustCompile("\\/?(([^\\/]+)\\/)?([^\\/]+)$")
+		if m := re.FindStringSubmatch(ref); m != nil {
+			typ := findReferencedType(m[2], info)
+			if u, e := url.Parse(ref); e == nil && u.IsAbs() {
+				return &ReferenceParam{info, ExternalReference{Type: typ, URL: ref}}
+			} else {
+				return &ReferenceParam{info, LocalReference{Type: typ, ID: m[3]}}
+			}
 		}
 	}
 	return &ReferenceParam{info, nil}
@@ -655,7 +815,7 @@ func findReferencedType(typeFromVal string, info SearchParamInfo) string {
 			}
 			valid = (t == target)
 		}
-	} else if len(info.Targets) > 0 {
+	} else if len(info.Targets) > 1 {
 		for _, target := range info.Targets {
 			if t == target {
 				valid = true
@@ -834,8 +994,8 @@ func ParseParamNameModifierAndPostFix(fullParam string) (param string, modifier 
 		param = split[0]
 		postfix = split[1]
 	}
-	if strings.Contains(fullParam, ":") {
-		split := strings.SplitN(fullParam, ":", 2)
+	if strings.Contains(param, ":") {
+		split := strings.SplitN(param, ":", 2)
 		param = split[0]
 		modifier = split[1]
 	}
@@ -857,6 +1017,8 @@ const (
 	LT Prefix = "lt"
 	GE Prefix = "ge"
 	LE Prefix = "le"
+	SA Prefix = "sa"
+	EB Prefix = "eb"
 	AP Prefix = "ap"
 )
 
@@ -869,7 +1031,7 @@ func (p Prefix) String() string {
 // prefix and value.
 func ExtractPrefixAndValue(s string) (Prefix, string) {
 	prefix := EQ
-	for _, p := range []Prefix{EQ, NE, GT, LT, GE, LE, AP} {
+	for _, p := range []Prefix{EQ, NE, GT, LT, GE, LE, SA, EB, AP} {
 		if strings.HasPrefix(s, p.String()) {
 			prefix = p
 			break

@@ -17,6 +17,42 @@ func (s *SearchPTSuite) SetUpSuite(c *C) {
 }
 
 /******************************************************************************
+ * PARAMETER NAMES
+ ******************************************************************************/
+
+func (s *SearchPTSuite) TestSimpleName(c *C) {
+	param, modifier, postfix := ParseParamNameModifierAndPostFix("foo")
+
+	c.Assert(param, Equals, "foo")
+	c.Assert(modifier, Equals, "")
+	c.Assert(postfix, Equals, "")
+}
+
+func (s *SearchPTSuite) TestSimpleNameWithModifier(c *C) {
+	param, modifier, postfix := ParseParamNameModifierAndPostFix("foo:Bar")
+
+	c.Assert(param, Equals, "foo")
+	c.Assert(modifier, Equals, "Bar")
+	c.Assert(postfix, Equals, "")
+}
+
+func (s *SearchPTSuite) TestSimpleNameWithPostfix(c *C) {
+	param, modifier, postfix := ParseParamNameModifierAndPostFix("foo.baz")
+
+	c.Assert(param, Equals, "foo")
+	c.Assert(modifier, Equals, "")
+	c.Assert(postfix, Equals, "baz")
+}
+
+func (s *SearchPTSuite) TestSimpleNameWithModifierAndPostfix(c *C) {
+	param, modifier, postfix := ParseParamNameModifierAndPostFix("foo:Bar.baz")
+
+	c.Assert(param, Equals, "foo")
+	c.Assert(modifier, Equals, "Bar")
+	c.Assert(postfix, Equals, "baz")
+}
+
+/******************************************************************************
  * COMPOSITE
  ******************************************************************************/
 
@@ -443,6 +479,16 @@ func (s *SearchPTSuite) TestDateParamPrefixes(c *C) {
 	c.Assert(d.Date.Precision, Equals, Second)
 	c.Assert(d.Date.Value.UnixNano(), Equals, time.Date(2013, time.January, 2, 12, 13, 14, 0, time.UTC).UnixNano())
 
+	d = ParseDateParam("sa2013-01-02T12:13:14Z", dateParamInfo)
+	c.Assert(d.Prefix, Equals, SA)
+	c.Assert(d.Date.Precision, Equals, Second)
+	c.Assert(d.Date.Value.UnixNano(), Equals, time.Date(2013, time.January, 2, 12, 13, 14, 0, time.UTC).UnixNano())
+
+	d = ParseDateParam("eb2013-01-02T12:13:14Z", dateParamInfo)
+	c.Assert(d.Prefix, Equals, EB)
+	c.Assert(d.Date.Precision, Equals, Second)
+	c.Assert(d.Date.Value.UnixNano(), Equals, time.Date(2013, time.January, 2, 12, 13, 14, 0, time.UTC).UnixNano())
+
 	d = ParseDateParam("ap2013-01-02T12:13:14Z", dateParamInfo)
 	c.Assert(d.Prefix, Equals, AP)
 	c.Assert(d.Date.Precision, Equals, Second)
@@ -633,6 +679,14 @@ func (s *SearchPTSuite) TestNumberParamPrefixes(c *C) {
 	c.Assert(n.Prefix, Equals, LE)
 	c.Assert(n.Number.String(), Equals, "100")
 
+	n = ParseNumberParam("sa100", numberParamInfo)
+	c.Assert(n.Prefix, Equals, SA)
+	c.Assert(n.Number.String(), Equals, "100")
+
+	n = ParseNumberParam("eb100", numberParamInfo)
+	c.Assert(n.Prefix, Equals, EB)
+	c.Assert(n.Number.String(), Equals, "100")
+
 	n = ParseNumberParam("ap100", numberParamInfo)
 	c.Assert(n.Prefix, Equals, AP)
 	c.Assert(n.Number.String(), Equals, "100")
@@ -804,6 +858,26 @@ func (s *SearchPTSuite) TestQuantityPrefixes(c *C) {
 	c.Assert(q.Paths, HasLen, 1)
 	c.Assert(q.Paths[0], DeepEquals, SearchParamPath{Path: "bar", Type: "quantity"})
 	c.Assert(q.Prefix, Equals, LE)
+	c.Assert(q.Number.String(), Equals, "5.4")
+	c.Assert(q.System, Equals, "http://unitsofmeasure.org")
+	c.Assert(q.Code, Equals, "mg")
+
+	q = ParseQuantityParam("sa5.4|http://unitsofmeasure.org|mg", quantityParamInfo)
+	c.Assert(q.Name, Equals, "foo")
+	c.Assert(q.Type, Equals, "quantity")
+	c.Assert(q.Paths, HasLen, 1)
+	c.Assert(q.Paths[0], DeepEquals, SearchParamPath{Path: "bar", Type: "quantity"})
+	c.Assert(q.Prefix, Equals, SA)
+	c.Assert(q.Number.String(), Equals, "5.4")
+	c.Assert(q.System, Equals, "http://unitsofmeasure.org")
+	c.Assert(q.Code, Equals, "mg")
+
+	q = ParseQuantityParam("eb5.4|http://unitsofmeasure.org|mg", quantityParamInfo)
+	c.Assert(q.Name, Equals, "foo")
+	c.Assert(q.Type, Equals, "quantity")
+	c.Assert(q.Paths, HasLen, 1)
+	c.Assert(q.Paths[0], DeepEquals, SearchParamPath{Path: "bar", Type: "quantity"})
+	c.Assert(q.Prefix, Equals, EB)
 	c.Assert(q.Number.String(), Equals, "5.4")
 	c.Assert(q.System, Equals, "http://unitsofmeasure.org")
 	c.Assert(q.Code, Equals, "mg")
@@ -1484,6 +1558,14 @@ func (s *SearchPTSuite) TestPrefixes(c *C) {
 	c.Assert(x, Equals, LE)
 	c.Assert(y, Equals, "10")
 
+	x, y = ExtractPrefixAndValue("sa10")
+	c.Assert(x, Equals, SA)
+	c.Assert(y, Equals, "10")
+
+	x, y = ExtractPrefixAndValue("eb10")
+	c.Assert(x, Equals, EB)
+	c.Assert(y, Equals, "10")
+
 	x, y = ExtractPrefixAndValue("ap10")
 	c.Assert(x, Equals, AP)
 	c.Assert(y, Equals, "10")
@@ -1499,38 +1581,211 @@ func (s *SearchPTSuite) TestPrefixDefault(c *C) {
  * QUERY
  ******************************************************************************/
 
-func (s *SearchPTSuite) TestNormalizedQueryValue(c *C) {
-	q := Query{Resource: "Patient", Query: "name%3Aexact=Robert+Smith&gender=M"}
-	v := q.NormalizedQueryValues(false)
-	c.Assert(v, HasLen, 2)
-	c.Assert(v.Get("name:exact"), Equals, "Robert Smith")
-	c.Assert(v.Get("gender"), Equals, "M")
+func (s *SearchPTSuite) TestURLQueryParameters(c *C) {
+	q := Query{Resource: "Patient", Query: "name%3Aexact=Robert+Smith&gender=male"}
+	queryParams := q.URLQueryParameters(false)
+	c.Assert(queryParams.All(), HasLen, 2)
+	c.Assert(queryParams.Get("name:exact"), Equals, "Robert Smith")
+	c.Assert(queryParams.Get("gender"), Equals, "male")
 }
 
-func (s *SearchPTSuite) TestReconstructQueryWithDefaultOptions(c *C) {
-	q := Query{Resource: "Patient", Query: "name%3Aexact=Robert+Smith&gender=M"}
-	v := q.NormalizedQueryValues(true)
-	c.Assert(v, HasLen, 4)
-	c.Assert(v.Get("name:exact"), Equals, "Robert Smith")
-	c.Assert(v.Get("gender"), Equals, "M")
-	c.Assert(v.Get(CountParam), Equals, "100")
-	c.Assert(v.Get(OffsetParam), Equals, "0")
+func (s *SearchPTSuite) TestQueryOptions(c *C) {
+	q := Query{Resource: "Patient", Query: "name%3Aexact=Robert+Smith&gender=M&_count=10&_offset=20&_include=Patient:careprovider&_include=Patient:organization&_revinclude=Condition:patient&_revinclude=Encounter:patient&_sort=family&_sort:asc=given&_sort:desc=birthdate"}
+	o := q.Options()
+	c.Assert(o.Count, Equals, 10)
+	c.Assert(o.Offset, Equals, 20)
+	c.Assert(o.Sort, HasLen, 3)
+	c.Assert(o.Sort[0].Descending, Equals, false)
+	c.Assert(o.Sort[0].Parameter.Name, Equals, "family")
+	c.Assert(o.Sort[1].Descending, Equals, false)
+	c.Assert(o.Sort[1].Parameter.Name, Equals, "given")
+	c.Assert(o.Sort[2].Descending, Equals, true)
+	c.Assert(o.Sort[2].Parameter.Name, Equals, "birthdate")
+	c.Assert(o.Include, HasLen, 2)
+	c.Assert(o.Include[0].Resource, Equals, "Patient")
+	c.Assert(o.Include[0].Parameter.Name, Equals, "careprovider")
+	c.Assert(o.Include[1].Resource, Equals, "Patient")
+	c.Assert(o.Include[1].Parameter.Name, Equals, "organization")
+	c.Assert(o.RevInclude[0].Resource, Equals, "Condition")
+	c.Assert(o.RevInclude[0].Parameter.Name, Equals, "patient")
+	c.Assert(o.RevInclude[1].Resource, Equals, "Encounter")
+	c.Assert(o.RevInclude[1].Parameter.Name, Equals, "patient")
+}
+
+func (s *SearchPTSuite) TestQueryOptionsWithSTU3Sort(c *C) {
+	q := Query{Resource: "Patient", Query: "_sort=family,given,-birthdate"}
+	o := q.Options()
+	c.Assert(o.Sort, HasLen, 3)
+	c.Assert(o.Sort[0].Descending, Equals, false)
+	c.Assert(o.Sort[0].Parameter.Name, Equals, "family")
+	c.Assert(o.Sort[1].Descending, Equals, false)
+	c.Assert(o.Sort[1].Parameter.Name, Equals, "given")
+	c.Assert(o.Sort[2].Descending, Equals, true)
+	c.Assert(o.Sort[2].Parameter.Name, Equals, "birthdate")
+}
+
+func (s *SearchPTSuite) TestQueryOptionsInvalidSortParam(c *C) {
+	q := Query{Resource: "Patient", Query: "_sort=foo"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_sort\" content is invalid"))
+}
+
+func (s *SearchPTSuite) TestQueryOptionsIncludeTargets(c *C) {
+	q := Query{Resource: "Patient", Query: "_include=Patient:careprovider:Organization"}
+	o := q.Options()
+	c.Assert(o.Include, HasLen, 1)
+	c.Assert(o.Include[0].Resource, Equals, "Patient")
+	c.Assert(o.Include[0].Parameter.Name, Equals, "careprovider")
+	c.Assert(o.Include[0].Parameter.Targets, HasLen, 1)
+	c.Assert(o.Include[0].Parameter.Targets[0], Equals, "Organization")
+
+	q = Query{Resource: "Patient", Query: "_include=Patient:careprovider:Practitioner"}
+	o = q.Options()
+	c.Assert(o.Include, HasLen, 1)
+	c.Assert(o.Include[0].Resource, Equals, "Patient")
+	c.Assert(o.Include[0].Parameter.Name, Equals, "careprovider")
+	c.Assert(o.Include[0].Parameter.Targets, HasLen, 1)
+	c.Assert(o.Include[0].Parameter.Targets[0], Equals, "Practitioner")
+
+	q = Query{Resource: "Patient", Query: "_include=Patient:careprovider"}
+	o = q.Options()
+	c.Assert(o.Include, HasLen, 1)
+	c.Assert(o.Include[0].Resource, Equals, "Patient")
+	c.Assert(o.Include[0].Parameter.Name, Equals, "careprovider")
+	c.Assert(o.Include[0].Parameter.Targets, HasLen, 2)
+	c.Assert(o.Include[0].Parameter.Targets[0], Equals, "Organization")
+	c.Assert(o.Include[0].Parameter.Targets[1], Equals, "Practitioner")
+}
+
+func (s *SearchPTSuite) TestQueryOptionsInvalidIncludeParams(c *C) {
+	// Non-existent parameter
+	q := Query{Resource: "Patient", Query: "_include=Patient:foo"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+
+	// Non-reference parameter
+	q = Query{Resource: "Patient", Query: "_include=Patient:name"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+
+	// Invalid target
+	q = Query{Resource: "Patient", Query: "_include=Patient:careprovider:Procedure"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+
+	// Too few parts
+	q = Query{Resource: "Patient", Query: "_include=careprovider"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+
+	// Too many parts
+	q = Query{Resource: "Patient", Query: "_include=Patient:careprovider:Procedure:0"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_include\" content is invalid"))
+}
+
+func (s *SearchPTSuite) TestQueryOptionsRevIncludeTargets(c *C) {
+	q := Query{Resource: "Patient", Query: "_revinclude=Observation:subject:Patient"}
+	o := q.Options()
+	c.Assert(o.RevInclude, HasLen, 1)
+	c.Assert(o.RevInclude[0].Resource, Equals, "Observation")
+	c.Assert(o.RevInclude[0].Parameter.Name, Equals, "subject")
+	c.Assert(o.RevInclude[0].Parameter.Targets, HasLen, 1)
+	c.Assert(o.RevInclude[0].Parameter.Targets[0], Equals, "Patient")
+
+	q = Query{Resource: "Patient", Query: "_revinclude=Observation:subject"}
+	o = q.Options()
+	c.Assert(o.RevInclude, HasLen, 1)
+	c.Assert(o.RevInclude[0].Resource, Equals, "Observation")
+	c.Assert(o.RevInclude[0].Parameter.Name, Equals, "subject")
+	c.Assert(o.RevInclude[0].Parameter.Targets, HasLen, 1)
+	c.Assert(o.RevInclude[0].Parameter.Targets[0], Equals, "Patient")
+}
+
+func (s *SearchPTSuite) TestQueryOptionsInvalidRevIncludeParams(c *C) {
+	// Non-existent parameter
+	q := Query{Resource: "Patient", Query: "_revinclude=Observation:foo"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+
+	// Non-reference parameter
+	q = Query{Resource: "Patient", Query: "_revinclude=Observation:code"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+
+	// Reference parameter to wrong type
+	q = Query{Resource: "Patient", Query: "_revinclude=Observation:device"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+
+	// Valid reference but invalid target
+	q = Query{Resource: "Patient", Query: "_revinclude=Observation:subject:Device"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+
+	// Too few parts
+	q = Query{Resource: "Patient", Query: "_revinclude=subject"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+
+	// Too many parts
+	q = Query{Resource: "Patient", Query: "_revinclude=Observation:subject:Patient:0"}
+	c.Assert(func() { q.Options() }, Panics, createInvalidSearchError("MSG_PARAM_INVALID", "Parameter \"_revinclude\" content is invalid"))
+}
+
+func (s *SearchPTSuite) TestQueryOptionsInvalidFormatParam(c *C) {
+	// Format that is not supported (XML)
+	q := Query{Resource: "Patient", Query: "_format=xml"}
+	c.Assert(func() { q.Options() }, Panics, createUnsupportedSearchError("MSG_PARAM_INVALID", "Parameter \"_format\" content is invalid"))
+
+	// Valid format (json)
+	q = Query{Resource: "Patient", Query: "_format=json"}
+	q.Options()
 }
 
 func (s *SearchPTSuite) TestReconstructQueryWithPassedInOptions(c *C) {
-	q := Query{Resource: "Patient", Query: "name%3Aexact=Robert+Smith&gender=M&_count=10&_offset=20"}
-	v := q.NormalizedQueryValues(true)
-	c.Assert(v, HasLen, 4)
-	c.Assert(v.Get("name:exact"), Equals, "Robert Smith")
-	c.Assert(v.Get("gender"), Equals, "M")
-	c.Assert(v.Get(CountParam), Equals, "10")
-	c.Assert(v.Get(OffsetParam), Equals, "20")
+	q := Query{Resource: "Patient", Query: "name%3Aexact=Robert+Smith&gender=male&_sort=family&_sort%3Adesc=given&_sort%3Aasc=birthdate&_offset=20&_count=10&_include=Patient%3Acareprovider&_include=Patient%3Aorganization&_revinclude=Condition%3Apatient&_revinclude=Encounter%3Apatient"}
+	params := q.URLQueryParameters(true)
+	all := params.All()
+	c.Assert(all, HasLen, 11)
+	c.Assert(all[0], DeepEquals, URLQueryParameter{Key: "name:exact", Value: "Robert Smith"})
+	c.Assert(all[1], DeepEquals, URLQueryParameter{Key: "gender", Value: "male"})
+	c.Assert(all[2], DeepEquals, URLQueryParameter{Key: SortParam, Value: "family"})
+	c.Assert(all[3], DeepEquals, URLQueryParameter{Key: SortParam + ":desc", Value: "given"})
+	c.Assert(all[4], DeepEquals, URLQueryParameter{Key: SortParam, Value: "birthdate"})
+	c.Assert(all[5], DeepEquals, URLQueryParameter{Key: OffsetParam, Value: "20"})
+	c.Assert(all[6], DeepEquals, URLQueryParameter{Key: CountParam, Value: "10"})
+	c.Assert(all[7], DeepEquals, URLQueryParameter{Key: IncludeParam, Value: "Patient:careprovider"})
+	c.Assert(all[8], DeepEquals, URLQueryParameter{Key: IncludeParam, Value: "Patient:organization"})
+	c.Assert(all[9], DeepEquals, URLQueryParameter{Key: RevIncludeParam, Value: "Condition:patient"})
+	c.Assert(all[10], DeepEquals, URLQueryParameter{Key: RevIncludeParam, Value: "Encounter:patient"})
 }
 
-func (s *SearchPTSuite) TestQueryOptionsQueryValues(c *C) {
-	q := QueryOptions{Count: 123, Offset: 456}
-	v := q.QueryValues()
-	c.Assert(v, HasLen, 2)
-	c.Assert(v.Get(CountParam), Equals, "123")
-	c.Assert(v.Get(OffsetParam), Equals, "456")
+func (s *SearchPTSuite) TestReconstructQueryStringWithSorts(c *C) {
+	// The main purpose of this is to ensure that the _sort parameters remain in the correct order
+	q := Query{Resource: "Patient", Query: "name%3Aexact=Robert+Smith&gender=male&_sort=family&_sort%3Adesc=given&_sort%3Aasc=birthdate&_offset=20&_count=10&_include=Patient%3Acareprovider&_include=Patient%3Aorganization&_revinclude=Condition%3Apatient&_revinclude=Encounter%3Apatient"}
+	params := q.URLQueryParameters(true)
+	c.Assert(params.Encode(), Equals, "name%3Aexact=Robert+Smith&gender=male&_sort=family&_sort%3Adesc=given&_sort=birthdate&_offset=20&_count=10&_include=Patient%3Acareprovider&_include=Patient%3Aorganization&_revinclude=Condition%3Apatient&_revinclude=Encounter%3Apatient")
+}
+
+func (s *SearchPTSuite) TestReconstructQueryStringWithSTU3Sorts(c *C) {
+	// The main purpose of this is to ensure that STU3-style sort gets reconstructed in STU3-style
+	q := Query{Resource: "Patient", Query: "name%3Aexact=Robert+Smith&gender=male&_sort=family%2C-given%2Cbirthdate&_offset=20&_count=10&_include=Patient%3Acareprovider&_include=Patient%3Aorganization&_revinclude=Condition%3Apatient&_revinclude=Encounter%3Apatient"}
+	params := q.URLQueryParameters(true)
+	c.Assert(params.Encode(), Equals, "name%3Aexact=Robert+Smith&gender=male&_sort=family%2C-given%2Cbirthdate&_offset=20&_count=10&_include=Patient%3Acareprovider&_include=Patient%3Aorganization&_revinclude=Condition%3Apatient&_revinclude=Encounter%3Apatient")
+}
+
+func (s *SearchPTSuite) TestQueryOptionsURLQueryParameters(c *C) {
+	q := QueryOptions{
+		Count:  123,
+		Offset: 456,
+		Include: []IncludeOption{
+			{Resource: "Patient", Parameter: SearchParameterDictionary["Patient"]["careprovider"]},
+		},
+		RevInclude: []RevIncludeOption{
+			{Resource: "Encounter", Parameter: SearchParameterDictionary["Encounter"]["patient"]},
+		},
+		Sort: []SortOption{
+			{Parameter: SearchParameterDictionary["Patient"]["name"]},
+			{Parameter: SearchParameterDictionary["Patient"]["birthdate"], Descending: true},
+		},
+	}
+	params := q.URLQueryParameters()
+	all := params.All()
+	c.Assert(all, HasLen, 6)
+	c.Assert(all[0], DeepEquals, URLQueryParameter{Key: SortParam, Value: "name"})
+	c.Assert(all[1], DeepEquals, URLQueryParameter{Key: SortParam + ":desc", Value: "birthdate"})
+	c.Assert(all[2], DeepEquals, URLQueryParameter{Key: OffsetParam, Value: "456"})
+	c.Assert(all[3], DeepEquals, URLQueryParameter{Key: CountParam, Value: "123"})
+	c.Assert(all[4], DeepEquals, URLQueryParameter{Key: IncludeParam, Value: "Patient:careprovider"})
+	c.Assert(all[5], DeepEquals, URLQueryParameter{Key: RevIncludeParam, Value: "Encounter:patient"})
 }

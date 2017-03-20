@@ -26,93 +26,136 @@
 
 package models
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+)
 
 type TestScript struct {
-	Id           string                        `json:"id" bson:"_id"`
-	Url          string                        `bson:"url,omitempty" json:"url,omitempty"`
-	Version      string                        `bson:"version,omitempty" json:"version,omitempty"`
-	Name         string                        `bson:"name,omitempty" json:"name,omitempty"`
-	Status       string                        `bson:"status,omitempty" json:"status,omitempty"`
-	Identifier   *Identifier                   `bson:"identifier,omitempty" json:"identifier,omitempty"`
-	Experimental *bool                         `bson:"experimental,omitempty" json:"experimental,omitempty"`
-	Publisher    string                        `bson:"publisher,omitempty" json:"publisher,omitempty"`
-	Contact      []TestScriptContactComponent  `bson:"contact,omitempty" json:"contact,omitempty"`
-	Date         *FHIRDateTime                 `bson:"date,omitempty" json:"date,omitempty"`
-	Description  string                        `bson:"description,omitempty" json:"description,omitempty"`
-	UseContext   []CodeableConcept             `bson:"useContext,omitempty" json:"useContext,omitempty"`
-	Requirements string                        `bson:"requirements,omitempty" json:"requirements,omitempty"`
-	Copyright    string                        `bson:"copyright,omitempty" json:"copyright,omitempty"`
-	Metadata     *TestScriptMetadataComponent  `bson:"metadata,omitempty" json:"metadata,omitempty"`
-	Multiserver  *bool                         `bson:"multiserver,omitempty" json:"multiserver,omitempty"`
-	Fixture      []TestScriptFixtureComponent  `bson:"fixture,omitempty" json:"fixture,omitempty"`
-	Profile      []Reference                   `bson:"profile,omitempty" json:"profile,omitempty"`
-	Variable     []TestScriptVariableComponent `bson:"variable,omitempty" json:"variable,omitempty"`
-	Setup        *TestScriptSetupComponent     `bson:"setup,omitempty" json:"setup,omitempty"`
-	Test         []TestScriptTestComponent     `bson:"test,omitempty" json:"test,omitempty"`
-	Teardown     *TestScriptTeardownComponent  `bson:"teardown,omitempty" json:"teardown,omitempty"`
+	DomainResource `bson:",inline"`
+	Url            string                        `bson:"url,omitempty" json:"url,omitempty"`
+	Version        string                        `bson:"version,omitempty" json:"version,omitempty"`
+	Name           string                        `bson:"name,omitempty" json:"name,omitempty"`
+	Status         string                        `bson:"status,omitempty" json:"status,omitempty"`
+	Identifier     *Identifier                   `bson:"identifier,omitempty" json:"identifier,omitempty"`
+	Experimental   *bool                         `bson:"experimental,omitempty" json:"experimental,omitempty"`
+	Publisher      string                        `bson:"publisher,omitempty" json:"publisher,omitempty"`
+	Contact        []TestScriptContactComponent  `bson:"contact,omitempty" json:"contact,omitempty"`
+	Date           *FHIRDateTime                 `bson:"date,omitempty" json:"date,omitempty"`
+	Description    string                        `bson:"description,omitempty" json:"description,omitempty"`
+	UseContext     []CodeableConcept             `bson:"useContext,omitempty" json:"useContext,omitempty"`
+	Requirements   string                        `bson:"requirements,omitempty" json:"requirements,omitempty"`
+	Copyright      string                        `bson:"copyright,omitempty" json:"copyright,omitempty"`
+	Metadata       *TestScriptMetadataComponent  `bson:"metadata,omitempty" json:"metadata,omitempty"`
+	Multiserver    *bool                         `bson:"multiserver,omitempty" json:"multiserver,omitempty"`
+	Fixture        []TestScriptFixtureComponent  `bson:"fixture,omitempty" json:"fixture,omitempty"`
+	Profile        []Reference                   `bson:"profile,omitempty" json:"profile,omitempty"`
+	Variable       []TestScriptVariableComponent `bson:"variable,omitempty" json:"variable,omitempty"`
+	Setup          *TestScriptSetupComponent     `bson:"setup,omitempty" json:"setup,omitempty"`
+	Test           []TestScriptTestComponent     `bson:"test,omitempty" json:"test,omitempty"`
+	Teardown       *TestScriptTeardownComponent  `bson:"teardown,omitempty" json:"teardown,omitempty"`
 }
 
 // Custom marshaller to add the resourceType property, as required by the specification
 func (resource *TestScript) MarshalJSON() ([]byte, error) {
-	x := struct {
-		ResourceType string `json:"resourceType"`
-		TestScript
-	}{
-		ResourceType: "TestScript",
-		TestScript:   *resource,
+	resource.ResourceType = "TestScript"
+	// Dereferencing the pointer to avoid infinite recursion.
+	// Passing in plain old x (a pointer to TestScript), would cause this same
+	// MarshallJSON function to be called again
+	return json.Marshal(*resource)
+}
+
+func (x *TestScript) GetBSON() (interface{}, error) {
+	x.ResourceType = "TestScript"
+	// See comment in MarshallJSON to see why we dereference
+	return *x, nil
+}
+
+// The "testScript" sub-type is needed to avoid infinite recursion in UnmarshalJSON
+type testScript TestScript
+
+// Custom unmarshaller to properly unmarshal embedded resources (represented as interface{})
+func (x *TestScript) UnmarshalJSON(data []byte) (err error) {
+	x2 := testScript{}
+	if err = json.Unmarshal(data, &x2); err == nil {
+		if x2.Contained != nil {
+			for i := range x2.Contained {
+				x2.Contained[i] = MapToResource(x2.Contained[i], true)
+			}
+		}
+		*x = TestScript(x2)
+		return x.checkResourceType()
 	}
-	return json.Marshal(x)
+	return
+}
+
+func (x *TestScript) checkResourceType() error {
+	if x.ResourceType == "" {
+		x.ResourceType = "TestScript"
+	} else if x.ResourceType != "TestScript" {
+		return errors.New(fmt.Sprintf("Expected resourceType to be TestScript, instead received %s", x.ResourceType))
+	}
+	return nil
 }
 
 type TestScriptContactComponent struct {
-	Name    string         `bson:"name,omitempty" json:"name,omitempty"`
-	Telecom []ContactPoint `bson:"telecom,omitempty" json:"telecom,omitempty"`
+	BackboneElement `bson:",inline"`
+	Name            string         `bson:"name,omitempty" json:"name,omitempty"`
+	Telecom         []ContactPoint `bson:"telecom,omitempty" json:"telecom,omitempty"`
 }
 
 type TestScriptMetadataComponent struct {
-	Link       []TestScriptMetadataLinkComponent       `bson:"link,omitempty" json:"link,omitempty"`
-	Capability []TestScriptMetadataCapabilityComponent `bson:"capability,omitempty" json:"capability,omitempty"`
+	BackboneElement `bson:",inline"`
+	Link            []TestScriptMetadataLinkComponent       `bson:"link,omitempty" json:"link,omitempty"`
+	Capability      []TestScriptMetadataCapabilityComponent `bson:"capability,omitempty" json:"capability,omitempty"`
 }
 
 type TestScriptMetadataLinkComponent struct {
-	Url         string `bson:"url,omitempty" json:"url,omitempty"`
-	Description string `bson:"description,omitempty" json:"description,omitempty"`
+	BackboneElement `bson:",inline"`
+	Url             string `bson:"url,omitempty" json:"url,omitempty"`
+	Description     string `bson:"description,omitempty" json:"description,omitempty"`
 }
 
 type TestScriptMetadataCapabilityComponent struct {
-	Required    *bool      `bson:"required,omitempty" json:"required,omitempty"`
-	Validated   *bool      `bson:"validated,omitempty" json:"validated,omitempty"`
-	Description string     `bson:"description,omitempty" json:"description,omitempty"`
-	Destination *int32     `bson:"destination,omitempty" json:"destination,omitempty"`
-	Link        []string   `bson:"link,omitempty" json:"link,omitempty"`
-	Conformance *Reference `bson:"conformance,omitempty" json:"conformance,omitempty"`
+	BackboneElement `bson:",inline"`
+	Required        *bool      `bson:"required,omitempty" json:"required,omitempty"`
+	Validated       *bool      `bson:"validated,omitempty" json:"validated,omitempty"`
+	Description     string     `bson:"description,omitempty" json:"description,omitempty"`
+	Destination     *int32     `bson:"destination,omitempty" json:"destination,omitempty"`
+	Link            []string   `bson:"link,omitempty" json:"link,omitempty"`
+	Conformance     *Reference `bson:"conformance,omitempty" json:"conformance,omitempty"`
 }
 
 type TestScriptFixtureComponent struct {
-	Autocreate *bool      `bson:"autocreate,omitempty" json:"autocreate,omitempty"`
-	Autodelete *bool      `bson:"autodelete,omitempty" json:"autodelete,omitempty"`
-	Resource   *Reference `bson:"resource,omitempty" json:"resource,omitempty"`
+	BackboneElement `bson:",inline"`
+	Autocreate      *bool      `bson:"autocreate,omitempty" json:"autocreate,omitempty"`
+	Autodelete      *bool      `bson:"autodelete,omitempty" json:"autodelete,omitempty"`
+	Resource        *Reference `bson:"resource,omitempty" json:"resource,omitempty"`
 }
 
 type TestScriptVariableComponent struct {
-	Name        string `bson:"name,omitempty" json:"name,omitempty"`
-	HeaderField string `bson:"headerField,omitempty" json:"headerField,omitempty"`
-	Path        string `bson:"path,omitempty" json:"path,omitempty"`
-	SourceId    string `bson:"sourceId,omitempty" json:"sourceId,omitempty"`
+	BackboneElement `bson:",inline"`
+	Name            string `bson:"name,omitempty" json:"name,omitempty"`
+	HeaderField     string `bson:"headerField,omitempty" json:"headerField,omitempty"`
+	Path            string `bson:"path,omitempty" json:"path,omitempty"`
+	SourceId        string `bson:"sourceId,omitempty" json:"sourceId,omitempty"`
 }
 
 type TestScriptSetupComponent struct {
-	Metadata *TestScriptMetadataComponent     `bson:"metadata,omitempty" json:"metadata,omitempty"`
-	Action   []TestScriptSetupActionComponent `bson:"action,omitempty" json:"action,omitempty"`
+	BackboneElement `bson:",inline"`
+	Metadata        *TestScriptMetadataComponent     `bson:"metadata,omitempty" json:"metadata,omitempty"`
+	Action          []TestScriptSetupActionComponent `bson:"action,omitempty" json:"action,omitempty"`
 }
 
 type TestScriptSetupActionComponent struct {
-	Operation *TestScriptSetupActionOperationComponent `bson:"operation,omitempty" json:"operation,omitempty"`
-	Assert    *TestScriptSetupActionAssertComponent    `bson:"assert,omitempty" json:"assert,omitempty"`
+	BackboneElement `bson:",inline"`
+	Operation       *TestScriptSetupActionOperationComponent `bson:"operation,omitempty" json:"operation,omitempty"`
+	Assert          *TestScriptSetupActionAssertComponent    `bson:"assert,omitempty" json:"assert,omitempty"`
 }
 
 type TestScriptSetupActionOperationComponent struct {
+	BackboneElement  `bson:",inline"`
 	Type             *Coding                                                `bson:"type,omitempty" json:"type,omitempty"`
 	Resource         string                                                 `bson:"resource,omitempty" json:"resource,omitempty"`
 	Label            string                                                 `bson:"label,omitempty" json:"label,omitempty"`
@@ -130,11 +173,13 @@ type TestScriptSetupActionOperationComponent struct {
 }
 
 type TestScriptSetupActionOperationRequestHeaderComponent struct {
-	Field string `bson:"field,omitempty" json:"field,omitempty"`
-	Value string `bson:"value,omitempty" json:"value,omitempty"`
+	BackboneElement `bson:",inline"`
+	Field           string `bson:"field,omitempty" json:"field,omitempty"`
+	Value           string `bson:"value,omitempty" json:"value,omitempty"`
 }
 
 type TestScriptSetupActionAssertComponent struct {
+	BackboneElement     `bson:",inline"`
 	Label               string `bson:"label,omitempty" json:"label,omitempty"`
 	Description         string `bson:"description,omitempty" json:"description,omitempty"`
 	Direction           string `bson:"direction,omitempty" json:"direction,omitempty"`
@@ -156,21 +201,400 @@ type TestScriptSetupActionAssertComponent struct {
 }
 
 type TestScriptTestComponent struct {
-	Name        string                          `bson:"name,omitempty" json:"name,omitempty"`
-	Description string                          `bson:"description,omitempty" json:"description,omitempty"`
-	Metadata    *TestScriptMetadataComponent    `bson:"metadata,omitempty" json:"metadata,omitempty"`
-	Action      []TestScriptTestActionComponent `bson:"action,omitempty" json:"action,omitempty"`
+	BackboneElement `bson:",inline"`
+	Name            string                          `bson:"name,omitempty" json:"name,omitempty"`
+	Description     string                          `bson:"description,omitempty" json:"description,omitempty"`
+	Metadata        *TestScriptMetadataComponent    `bson:"metadata,omitempty" json:"metadata,omitempty"`
+	Action          []TestScriptTestActionComponent `bson:"action,omitempty" json:"action,omitempty"`
 }
 
 type TestScriptTestActionComponent struct {
-	Operation *TestScriptSetupActionOperationComponent `bson:"operation,omitempty" json:"operation,omitempty"`
-	Assert    *TestScriptSetupActionAssertComponent    `bson:"assert,omitempty" json:"assert,omitempty"`
+	BackboneElement `bson:",inline"`
+	Operation       *TestScriptSetupActionOperationComponent `bson:"operation,omitempty" json:"operation,omitempty"`
+	Assert          *TestScriptSetupActionAssertComponent    `bson:"assert,omitempty" json:"assert,omitempty"`
 }
 
 type TestScriptTeardownComponent struct {
-	Action []TestScriptTeardownActionComponent `bson:"action,omitempty" json:"action,omitempty"`
+	BackboneElement `bson:",inline"`
+	Action          []TestScriptTeardownActionComponent `bson:"action,omitempty" json:"action,omitempty"`
 }
 
 type TestScriptTeardownActionComponent struct {
-	Operation *TestScriptSetupActionOperationComponent `bson:"operation,omitempty" json:"operation,omitempty"`
+	BackboneElement `bson:",inline"`
+	Operation       *TestScriptSetupActionOperationComponent `bson:"operation,omitempty" json:"operation,omitempty"`
+}
+
+type TestScriptPlus struct {
+	TestScript                     `bson:",inline"`
+	TestScriptPlusRelatedResources `bson:",inline"`
+}
+
+type TestScriptPlusRelatedResources struct {
+	RevIncludedProvenanceResourcesReferencingTarget             *[]Provenance            `bson:"_revIncludedProvenanceResourcesReferencingTarget,omitempty"`
+	RevIncludedDocumentManifestResourcesReferencingContentref   *[]DocumentManifest      `bson:"_revIncludedDocumentManifestResourcesReferencingContentref,omitempty"`
+	RevIncludedDocumentManifestResourcesReferencingRelatedref   *[]DocumentManifest      `bson:"_revIncludedDocumentManifestResourcesReferencingRelatedref,omitempty"`
+	RevIncludedListResourcesReferencingItem                     *[]List                  `bson:"_revIncludedListResourcesReferencingItem,omitempty"`
+	RevIncludedDocumentReferenceResourcesReferencingRelatedref  *[]DocumentReference     `bson:"_revIncludedDocumentReferenceResourcesReferencingRelatedref,omitempty"`
+	RevIncludedOrderResourcesReferencingDetail                  *[]Order                 `bson:"_revIncludedOrderResourcesReferencingDetail,omitempty"`
+	RevIncludedBasicResourcesReferencingSubject                 *[]Basic                 `bson:"_revIncludedBasicResourcesReferencingSubject,omitempty"`
+	RevIncludedAuditEventResourcesReferencingReference          *[]AuditEvent            `bson:"_revIncludedAuditEventResourcesReferencingReference,omitempty"`
+	RevIncludedCompositionResourcesReferencingSubject           *[]Composition           `bson:"_revIncludedCompositionResourcesReferencingSubject,omitempty"`
+	RevIncludedCompositionResourcesReferencingEntry             *[]Composition           `bson:"_revIncludedCompositionResourcesReferencingEntry,omitempty"`
+	RevIncludedDetectedIssueResourcesReferencingImplicated      *[]DetectedIssue         `bson:"_revIncludedDetectedIssueResourcesReferencingImplicated,omitempty"`
+	RevIncludedOrderResponseResourcesReferencingFulfillment     *[]OrderResponse         `bson:"_revIncludedOrderResponseResourcesReferencingFulfillment,omitempty"`
+	RevIncludedQuestionnaireResponseResourcesReferencingSubject *[]QuestionnaireResponse `bson:"_revIncludedQuestionnaireResponseResourcesReferencingSubject,omitempty"`
+	RevIncludedProcessResponseResourcesReferencingRequest       *[]ProcessResponse       `bson:"_revIncludedProcessResponseResourcesReferencingRequest,omitempty"`
+	RevIncludedClinicalImpressionResourcesReferencingTrigger    *[]ClinicalImpression    `bson:"_revIncludedClinicalImpressionResourcesReferencingTrigger,omitempty"`
+	RevIncludedMessageHeaderResourcesReferencingData            *[]MessageHeader         `bson:"_revIncludedMessageHeaderResourcesReferencingData,omitempty"`
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedProvenanceResourcesReferencingTarget() (provenances []Provenance, err error) {
+	if t.RevIncludedProvenanceResourcesReferencingTarget == nil {
+		err = errors.New("RevIncluded provenances not requested")
+	} else {
+		provenances = *t.RevIncludedProvenanceResourcesReferencingTarget
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedDocumentManifestResourcesReferencingContentref() (documentManifests []DocumentManifest, err error) {
+	if t.RevIncludedDocumentManifestResourcesReferencingContentref == nil {
+		err = errors.New("RevIncluded documentManifests not requested")
+	} else {
+		documentManifests = *t.RevIncludedDocumentManifestResourcesReferencingContentref
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedDocumentManifestResourcesReferencingRelatedref() (documentManifests []DocumentManifest, err error) {
+	if t.RevIncludedDocumentManifestResourcesReferencingRelatedref == nil {
+		err = errors.New("RevIncluded documentManifests not requested")
+	} else {
+		documentManifests = *t.RevIncludedDocumentManifestResourcesReferencingRelatedref
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedListResourcesReferencingItem() (lists []List, err error) {
+	if t.RevIncludedListResourcesReferencingItem == nil {
+		err = errors.New("RevIncluded lists not requested")
+	} else {
+		lists = *t.RevIncludedListResourcesReferencingItem
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedDocumentReferenceResourcesReferencingRelatedref() (documentReferences []DocumentReference, err error) {
+	if t.RevIncludedDocumentReferenceResourcesReferencingRelatedref == nil {
+		err = errors.New("RevIncluded documentReferences not requested")
+	} else {
+		documentReferences = *t.RevIncludedDocumentReferenceResourcesReferencingRelatedref
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedOrderResourcesReferencingDetail() (orders []Order, err error) {
+	if t.RevIncludedOrderResourcesReferencingDetail == nil {
+		err = errors.New("RevIncluded orders not requested")
+	} else {
+		orders = *t.RevIncludedOrderResourcesReferencingDetail
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedBasicResourcesReferencingSubject() (basics []Basic, err error) {
+	if t.RevIncludedBasicResourcesReferencingSubject == nil {
+		err = errors.New("RevIncluded basics not requested")
+	} else {
+		basics = *t.RevIncludedBasicResourcesReferencingSubject
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedAuditEventResourcesReferencingReference() (auditEvents []AuditEvent, err error) {
+	if t.RevIncludedAuditEventResourcesReferencingReference == nil {
+		err = errors.New("RevIncluded auditEvents not requested")
+	} else {
+		auditEvents = *t.RevIncludedAuditEventResourcesReferencingReference
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedCompositionResourcesReferencingSubject() (compositions []Composition, err error) {
+	if t.RevIncludedCompositionResourcesReferencingSubject == nil {
+		err = errors.New("RevIncluded compositions not requested")
+	} else {
+		compositions = *t.RevIncludedCompositionResourcesReferencingSubject
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedCompositionResourcesReferencingEntry() (compositions []Composition, err error) {
+	if t.RevIncludedCompositionResourcesReferencingEntry == nil {
+		err = errors.New("RevIncluded compositions not requested")
+	} else {
+		compositions = *t.RevIncludedCompositionResourcesReferencingEntry
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedDetectedIssueResourcesReferencingImplicated() (detectedIssues []DetectedIssue, err error) {
+	if t.RevIncludedDetectedIssueResourcesReferencingImplicated == nil {
+		err = errors.New("RevIncluded detectedIssues not requested")
+	} else {
+		detectedIssues = *t.RevIncludedDetectedIssueResourcesReferencingImplicated
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedOrderResponseResourcesReferencingFulfillment() (orderResponses []OrderResponse, err error) {
+	if t.RevIncludedOrderResponseResourcesReferencingFulfillment == nil {
+		err = errors.New("RevIncluded orderResponses not requested")
+	} else {
+		orderResponses = *t.RevIncludedOrderResponseResourcesReferencingFulfillment
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedQuestionnaireResponseResourcesReferencingSubject() (questionnaireResponses []QuestionnaireResponse, err error) {
+	if t.RevIncludedQuestionnaireResponseResourcesReferencingSubject == nil {
+		err = errors.New("RevIncluded questionnaireResponses not requested")
+	} else {
+		questionnaireResponses = *t.RevIncludedQuestionnaireResponseResourcesReferencingSubject
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedProcessResponseResourcesReferencingRequest() (processResponses []ProcessResponse, err error) {
+	if t.RevIncludedProcessResponseResourcesReferencingRequest == nil {
+		err = errors.New("RevIncluded processResponses not requested")
+	} else {
+		processResponses = *t.RevIncludedProcessResponseResourcesReferencingRequest
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedClinicalImpressionResourcesReferencingTrigger() (clinicalImpressions []ClinicalImpression, err error) {
+	if t.RevIncludedClinicalImpressionResourcesReferencingTrigger == nil {
+		err = errors.New("RevIncluded clinicalImpressions not requested")
+	} else {
+		clinicalImpressions = *t.RevIncludedClinicalImpressionResourcesReferencingTrigger
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedMessageHeaderResourcesReferencingData() (messageHeaders []MessageHeader, err error) {
+	if t.RevIncludedMessageHeaderResourcesReferencingData == nil {
+		err = errors.New("RevIncluded messageHeaders not requested")
+	} else {
+		messageHeaders = *t.RevIncludedMessageHeaderResourcesReferencingData
+	}
+	return
+}
+
+func (t *TestScriptPlusRelatedResources) GetIncludedResources() map[string]interface{} {
+	resourceMap := make(map[string]interface{})
+	return resourceMap
+}
+
+func (t *TestScriptPlusRelatedResources) GetRevIncludedResources() map[string]interface{} {
+	resourceMap := make(map[string]interface{})
+	if t.RevIncludedProvenanceResourcesReferencingTarget != nil {
+		for idx := range *t.RevIncludedProvenanceResourcesReferencingTarget {
+			rsc := (*t.RevIncludedProvenanceResourcesReferencingTarget)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedDocumentManifestResourcesReferencingContentref != nil {
+		for idx := range *t.RevIncludedDocumentManifestResourcesReferencingContentref {
+			rsc := (*t.RevIncludedDocumentManifestResourcesReferencingContentref)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedDocumentManifestResourcesReferencingRelatedref != nil {
+		for idx := range *t.RevIncludedDocumentManifestResourcesReferencingRelatedref {
+			rsc := (*t.RevIncludedDocumentManifestResourcesReferencingRelatedref)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedListResourcesReferencingItem != nil {
+		for idx := range *t.RevIncludedListResourcesReferencingItem {
+			rsc := (*t.RevIncludedListResourcesReferencingItem)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedDocumentReferenceResourcesReferencingRelatedref != nil {
+		for idx := range *t.RevIncludedDocumentReferenceResourcesReferencingRelatedref {
+			rsc := (*t.RevIncludedDocumentReferenceResourcesReferencingRelatedref)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedOrderResourcesReferencingDetail != nil {
+		for idx := range *t.RevIncludedOrderResourcesReferencingDetail {
+			rsc := (*t.RevIncludedOrderResourcesReferencingDetail)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedBasicResourcesReferencingSubject != nil {
+		for idx := range *t.RevIncludedBasicResourcesReferencingSubject {
+			rsc := (*t.RevIncludedBasicResourcesReferencingSubject)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedAuditEventResourcesReferencingReference != nil {
+		for idx := range *t.RevIncludedAuditEventResourcesReferencingReference {
+			rsc := (*t.RevIncludedAuditEventResourcesReferencingReference)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedCompositionResourcesReferencingSubject != nil {
+		for idx := range *t.RevIncludedCompositionResourcesReferencingSubject {
+			rsc := (*t.RevIncludedCompositionResourcesReferencingSubject)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedCompositionResourcesReferencingEntry != nil {
+		for idx := range *t.RevIncludedCompositionResourcesReferencingEntry {
+			rsc := (*t.RevIncludedCompositionResourcesReferencingEntry)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedDetectedIssueResourcesReferencingImplicated != nil {
+		for idx := range *t.RevIncludedDetectedIssueResourcesReferencingImplicated {
+			rsc := (*t.RevIncludedDetectedIssueResourcesReferencingImplicated)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedOrderResponseResourcesReferencingFulfillment != nil {
+		for idx := range *t.RevIncludedOrderResponseResourcesReferencingFulfillment {
+			rsc := (*t.RevIncludedOrderResponseResourcesReferencingFulfillment)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedQuestionnaireResponseResourcesReferencingSubject != nil {
+		for idx := range *t.RevIncludedQuestionnaireResponseResourcesReferencingSubject {
+			rsc := (*t.RevIncludedQuestionnaireResponseResourcesReferencingSubject)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedProcessResponseResourcesReferencingRequest != nil {
+		for idx := range *t.RevIncludedProcessResponseResourcesReferencingRequest {
+			rsc := (*t.RevIncludedProcessResponseResourcesReferencingRequest)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedClinicalImpressionResourcesReferencingTrigger != nil {
+		for idx := range *t.RevIncludedClinicalImpressionResourcesReferencingTrigger {
+			rsc := (*t.RevIncludedClinicalImpressionResourcesReferencingTrigger)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedMessageHeaderResourcesReferencingData != nil {
+		for idx := range *t.RevIncludedMessageHeaderResourcesReferencingData {
+			rsc := (*t.RevIncludedMessageHeaderResourcesReferencingData)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	return resourceMap
+}
+
+func (t *TestScriptPlusRelatedResources) GetIncludedAndRevIncludedResources() map[string]interface{} {
+	resourceMap := make(map[string]interface{})
+	if t.RevIncludedProvenanceResourcesReferencingTarget != nil {
+		for idx := range *t.RevIncludedProvenanceResourcesReferencingTarget {
+			rsc := (*t.RevIncludedProvenanceResourcesReferencingTarget)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedDocumentManifestResourcesReferencingContentref != nil {
+		for idx := range *t.RevIncludedDocumentManifestResourcesReferencingContentref {
+			rsc := (*t.RevIncludedDocumentManifestResourcesReferencingContentref)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedDocumentManifestResourcesReferencingRelatedref != nil {
+		for idx := range *t.RevIncludedDocumentManifestResourcesReferencingRelatedref {
+			rsc := (*t.RevIncludedDocumentManifestResourcesReferencingRelatedref)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedListResourcesReferencingItem != nil {
+		for idx := range *t.RevIncludedListResourcesReferencingItem {
+			rsc := (*t.RevIncludedListResourcesReferencingItem)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedDocumentReferenceResourcesReferencingRelatedref != nil {
+		for idx := range *t.RevIncludedDocumentReferenceResourcesReferencingRelatedref {
+			rsc := (*t.RevIncludedDocumentReferenceResourcesReferencingRelatedref)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedOrderResourcesReferencingDetail != nil {
+		for idx := range *t.RevIncludedOrderResourcesReferencingDetail {
+			rsc := (*t.RevIncludedOrderResourcesReferencingDetail)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedBasicResourcesReferencingSubject != nil {
+		for idx := range *t.RevIncludedBasicResourcesReferencingSubject {
+			rsc := (*t.RevIncludedBasicResourcesReferencingSubject)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedAuditEventResourcesReferencingReference != nil {
+		for idx := range *t.RevIncludedAuditEventResourcesReferencingReference {
+			rsc := (*t.RevIncludedAuditEventResourcesReferencingReference)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedCompositionResourcesReferencingSubject != nil {
+		for idx := range *t.RevIncludedCompositionResourcesReferencingSubject {
+			rsc := (*t.RevIncludedCompositionResourcesReferencingSubject)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedCompositionResourcesReferencingEntry != nil {
+		for idx := range *t.RevIncludedCompositionResourcesReferencingEntry {
+			rsc := (*t.RevIncludedCompositionResourcesReferencingEntry)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedDetectedIssueResourcesReferencingImplicated != nil {
+		for idx := range *t.RevIncludedDetectedIssueResourcesReferencingImplicated {
+			rsc := (*t.RevIncludedDetectedIssueResourcesReferencingImplicated)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedOrderResponseResourcesReferencingFulfillment != nil {
+		for idx := range *t.RevIncludedOrderResponseResourcesReferencingFulfillment {
+			rsc := (*t.RevIncludedOrderResponseResourcesReferencingFulfillment)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedQuestionnaireResponseResourcesReferencingSubject != nil {
+		for idx := range *t.RevIncludedQuestionnaireResponseResourcesReferencingSubject {
+			rsc := (*t.RevIncludedQuestionnaireResponseResourcesReferencingSubject)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedProcessResponseResourcesReferencingRequest != nil {
+		for idx := range *t.RevIncludedProcessResponseResourcesReferencingRequest {
+			rsc := (*t.RevIncludedProcessResponseResourcesReferencingRequest)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedClinicalImpressionResourcesReferencingTrigger != nil {
+		for idx := range *t.RevIncludedClinicalImpressionResourcesReferencingTrigger {
+			rsc := (*t.RevIncludedClinicalImpressionResourcesReferencingTrigger)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	if t.RevIncludedMessageHeaderResourcesReferencingData != nil {
+		for idx := range *t.RevIncludedMessageHeaderResourcesReferencingData {
+			rsc := (*t.RevIncludedMessageHeaderResourcesReferencingData)[idx]
+			resourceMap[rsc.Id] = &rsc
+		}
+	}
+	return resourceMap
 }
